@@ -1,10 +1,7 @@
 import base64
-from sqlite3 import Timestamp
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
-from datetime import date, datetime 
-import time
-
+from datetime import date, datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY']='secret'
@@ -55,7 +52,6 @@ class Jadwal(db.Model):
     hari = db.Column(db.Date, nullable=False)
     jam = db.Column(db.Time, nullable=False)
     harga = db.Column(db.Integer, nullable=False)
-    status = db.Column(db.String, nullable=False)
     film_judul = db.Column(db.String, nullable=False)
     film_kategori = db.Column(db.String, nullable=False)
     film_durasi = db.Column(db.String(20), nullable=False)
@@ -140,6 +136,25 @@ def auth_admin(auth): # ----- auth admin tanpa id
 
 
 # ------------------------------------------- Admin
+# @app.route('/admin/',methods=['POST']) # ----- CREATE ADMIN INITIATION
+# def initiation_admin():
+#     data = request.get_json()
+#     admin = Admin(
+#         nama=data['nama'],
+#         username=data['username'],
+#         password=data['password']
+#         )
+#     try :
+#         db.session.add(admin)
+#         db.session.commit()
+#         return {
+#             "message" : "sukses"
+#         },201
+#     except :
+#         return {
+#             "message" : "gagal"
+#         },400
+
 @app.route('/admin/',methods=['POST']) # ----- auth admin tanpa id
 def post_admin():
     decode = request.headers.get('Authorization')
@@ -233,7 +248,7 @@ def delete_admin(id):
 
 
 # ------------------------------------------- User
-@app.route('/user/',methods=['POST'])
+@app.route('/user/',methods=['POST']) # ----- SIGN UP
 def post_user():
     data = request.get_json()
     user = User(
@@ -330,7 +345,7 @@ def get_film():
            "produksi": film.produksi,
            "durasi": film.durasi,
            "country": film.country
-           } for film in Film.query.all()
+           } for film in Film.query.order_by(Film.film_kategori.asc()).all()
     ]), 201
 
 @app.route('/film/',methods=['POST']) # ----- auth film
@@ -377,7 +392,8 @@ def update_film(id):
         data = request.get_json()
         film = Film.query.filter_by(id=id).first()
         film.judul=data['judul'],
-        film.film_kategori=data['film_kategori']
+        film.kategori_id=data['kategori_id'],
+        film.film_kategori=film.kategori.kategori_film,
         film.deskripsi=data['deskripsi'],
         film.rating=data['rating'],
         film.produksi=data['produksi'],
@@ -504,7 +520,7 @@ def get_teater():
             "nama": teater.nama,
             "kapasitas" : teater.kapasitas   
         } 
-        for teater in Teater.query.all()
+        for teater in Teater.query.order_by(Teater.nama.asc()).all()
     ]), 201
 
 @app.route('/teater/',methods=['POST']) # ----- auth teater
@@ -576,7 +592,7 @@ def cari_film():
             )
     return jsonify(list)
 
-@app.route('/jadwal/',methods=['POST']) # ----- auth teater
+@app.route('/jadwal/',methods=['POST']) # ----- auth jadwal
 def post_jadwal():
     decode = request.headers.get('Authorization')
     allow = auth_admin(decode)
@@ -585,7 +601,7 @@ def post_jadwal():
         teater = Teater.query.filter_by(nama=data['nama']).first()
         if not teater:
             return {
-                'message': 'nama teater harus'
+                'message': 'tidak ada teater yang terisi'
             }
 
         film = Film.query.filter_by(judul=data['judul']).first()
@@ -604,8 +620,7 @@ def post_jadwal():
             film_durasi=film.durasi,
             teater_nama=teater.nama,
             teater_kapasitas=teater.kapasitas,
-            teater_id=teater.id,
-            status= "sedang tayang"
+            teater_id=teater.id
             )
         try :
             db.session.add(jadwal)
@@ -622,9 +637,9 @@ def post_jadwal():
             'message' : 'akses ditolak selain admin !'
         }
 
-@app.route('/jadwal/',methods=['GET']) # ----- fixed
+@app.route('/jadwal/',methods=['GET']) # ----- FIXED 11/09/22
 def get_jadwal():
-    result = db.engine.execute(f'''SELECT * FROM jadwal WHERE hari >= '%%{datetime.today()}%%' AND jam > '%%{datetime.now()}%%' ORDER BY hari desc ''')
+    result = db.engine.execute(f'''SELECT * FROM jadwal WHERE hari = '%%{datetime.today()}%%' AND jam > '%%{datetime.today()}%%' OR hari > '%%{datetime.today()}%%' ORDER BY hari desc ''') # ----- EXPIRED
     lst = []
     for x in result:
         if x:
@@ -633,7 +648,6 @@ def get_jadwal():
                     "hari" : x.hari.strftime("%d-%m-%Y"),
                     "jam": x.jam.strftime("%H:%M"),
                     "harga": x.harga,
-                    "status" : x.status,
                     "teater_nama": x.teater_nama,
                     "film_judul" : x.film_judul,
                     "film_kategori" : x.film_kategori,
@@ -732,11 +746,11 @@ def post_transaksi(id):
             )
         if transaksi.total_bayar > user.saldo :
             return {
-                'message' : 'om kurang'
+                'message' : 'kurang'
             }
         if transaksi.jumlah_tiket > jadwal.teater_kapasitas :
             return {
-                'message' : 'kursi penuh'
+                'message' : 'kursi penuh, anda kurang beruntung !'
             }
         try :
             user.saldo -= transaksi.total_bayar
@@ -784,7 +798,7 @@ def get_transaksi():
 def get_filmActive():
     decode = request.headers.get('Authorization')
     allow = auth_user(decode)
-    result = db.engine.execute(f'''SELECT * FROM transaksi WHERE user_id ='{allow}' AND jadwal_hari >= '%%{datetime.today()}%%' AND jadwal_jam > '%%{datetime.now()}%%' ORDER BY jadwal_hari desc ''' )
+    result = db.engine.execute(f'''SELECT * FROM transaksi WHERE user_id ='{allow}' AND jadwal_hari = '%%{datetime.today()}%%' AND jadwal_jam > '%%{datetime.now()}%%' OR user_id ='{allow}' AND jadwal_hari > '%%{datetime.today()}%%' ORDER BY jadwal_hari desc ''' )
     list = []
     for i in result:
         if i:
@@ -870,7 +884,7 @@ def get_topup():
         return jsonify([
             {
                 "saldo_history" : topup.saldo_history,
-                "tanggal" : topup.tanggal,
+                "tanggal" : topup.tanggal.strftime("%A" + "," + str(topup.tanggal)[:16]),
                 "nama_user" : topup.nama_user,
                 "pembayaran_metode" : topup.pembayaran_metode,
             } for topup in Topup.query.order_by(Topup.id.desc()).filter_by(user_id=user.id).all()
@@ -913,5 +927,27 @@ def post_metode():
     else :
         return {
             'message' : 'akses ditolak !'
+        }
+
+@app.route('/metode/<id>',methods=['PUT']) # ----- auth metode
+def update_metode(id):
+    decode = request.headers.get('Authorization')
+    allow = auth_admin(decode)
+    if allow == 'admin':
+        data = request.get_json()
+        metode = Metode.query.filter_by(id=id).first()
+        metode.pembayaran=data['pembayaran']
+        try :
+            db.session.commit()
+            return {
+                "message" : "sukses"
+            },201
+        except :
+            return {
+                "message" : "gagal"
+            },400
+    else :
+        return {
+            'message' : 'akses ditolak selain admin'
         }
         
